@@ -1,0 +1,4 @@
+node_modules/
+.env
+data/apo.db
+data/call_list.csv

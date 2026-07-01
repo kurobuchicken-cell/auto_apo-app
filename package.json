@@ -1,0 +1,18 @@
+{
+  "name": "auto-apo-app",
+  "version": "0.1.0",
+  "description": "アポ獲得アプリ（M4下書き生成〜M7返信管理）。corp-lead-kitのM1〜M3を依存として利用する。",
+  "main": "src/run.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/run.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "corp-lead-kit": "file:../corp-lead-kit"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}
