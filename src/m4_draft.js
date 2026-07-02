@@ -46,7 +46,7 @@ function getMailReadyCompanies(limit) {
 function getCompanyById(id) {
   const db = new DatabaseSync(LEADS_DB_PATH, { readOnly: true });
   try {
-    return db.prepare(`SELECT id, name, business_summary FROM companies WHERE id = ?`).get(id);
+    return db.prepare(`SELECT id, name, business_summary, email FROM companies WHERE id = ?`).get(id);
   } finally {
     db.close();
   }

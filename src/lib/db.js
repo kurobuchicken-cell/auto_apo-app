@@ -19,6 +19,14 @@ CREATE TABLE IF NOT EXISTS drafts (
   created_at         TEXT,
   updated_at         TEXT
 );
+
+CREATE TABLE IF NOT EXISTS sent_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id INTEGER,
+  draft_id   INTEGER,
+  sent_at    TEXT,
+  channel    TEXT
+);
 `;
 
 // M4実装時点のDBファイルには discord_message_id が無いため、既存ファイルにも後付けできるようにする。
@@ -80,6 +88,21 @@ function updateDraftContent(db, id, { subject, body, pain_hypothesis, confidence
   `).run(subject, body, pain_hypothesis, confidence, status, now, id);
 }
 
+// M6の送信記録（仕様書§3 M6・§5）。channelは'email'（v1は手動送信）を想定。
+function insertSentLog(db, { company_id, draft_id, channel }) {
+  const now = new Date().toISOString();
+  const stmt = db.prepare(`
+    INSERT INTO sent_log (company_id, draft_id, sent_at, channel)
+    VALUES (?, ?, ?, ?)
+    RETURNING *
+  `);
+  return stmt.get(company_id, draft_id, now, channel);
+}
+
+function getSentLogByDraftId(db, draftId) {
+  return db.prepare(`SELECT * FROM sent_log WHERE draft_id = ?`).get(draftId);
+}
+
 module.exports = {
   openDb,
   insertDraft,
@@ -89,5 +112,7 @@ module.exports = {
   setDraftDiscordMessageId,
   updateDraftStatus,
   updateDraftContent,
+  insertSentLog,
+  getSentLogByDraftId,
   DEFAULT_DB_PATH,
 };
