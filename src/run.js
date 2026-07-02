@@ -64,7 +64,7 @@ async function runM1(options, companies) {
 async function runM2(options, companies) {
   const targets = companies || getCompaniesByStatus('discovered', options.limit);
   const result = await enrichSites(targets, { dbPath: LEADS_DB_PATH });
-  console.log(`[M2] ${result.length}社を巡回しました。`);
+  console.log(`[M2] ${result.length}社を巡回しました。合計コスト: 約¥${Math.round(result.costJpy)}`);
   return result;
 }
 

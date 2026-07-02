@@ -8,6 +8,7 @@ const {
   insertDraft,
   getDraftById,
   updateDraftContent,
+  getDraftedCompanyIds,
 } = require('./lib/db');
 const { createClient, generatePainHypothesis, generateMailBody } = require('./lib/ai');
 const { createBudgetTracker } = require('./lib/cost');
@@ -31,15 +32,25 @@ function extractSignatureTemplate(raw) {
   return (parts.length > 1 ? parts.slice(1).join('\n---\n') : raw).trim();
 }
 
+// 既に下書きがある会社（company_id）はここで除外する。M5の✏️再生成はregenerateDraft経由で
+// 既存draft行を上書きするため、このrunからは呼ばれない＝ここで除外しても再生成フローと衝突しない。
 function getMailReadyCompanies(limit) {
-  const db = new DatabaseSync(LEADS_DB_PATH, { readOnly: true });
+  const leadsDb = new DatabaseSync(LEADS_DB_PATH, { readOnly: true });
+  let alreadyDrafted;
   try {
-    const stmt = db.prepare(
-      `SELECT id, name, business_summary FROM companies WHERE status = 'mail_ready' LIMIT ?`
-    );
-    return stmt.all(limit ? Number(limit) : -1);
+    const apoDb = openApoDb();
+    try {
+      alreadyDrafted = new Set(getDraftedCompanyIds(apoDb));
+    } finally {
+      apoDb.close();
+    }
+    const rows = leadsDb
+      .prepare(`SELECT id, name, business_summary FROM companies WHERE status = 'mail_ready'`)
+      .all()
+      .filter((c) => !alreadyDrafted.has(c.id));
+    return limit ? rows.slice(0, Number(limit)) : rows;
   } finally {
-    db.close();
+    leadsDb.close();
   }
 }
 

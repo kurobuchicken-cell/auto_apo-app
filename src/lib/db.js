@@ -60,6 +60,11 @@ function getDraftsByStatus(db, status) {
   return db.prepare(`SELECT * FROM drafts WHERE status = ? ORDER BY id ASC`).all(status);
 }
 
+// M4の再実行で同じ会社の下書きを二重生成しないための既存チェック用。
+function getDraftedCompanyIds(db) {
+  return db.prepare(`SELECT DISTINCT company_id FROM drafts`).all().map((r) => r.company_id);
+}
+
 // M7：sent/repliedなど、複数statusにまたがる下書きを一度に取得する（反応待ち・アポ化待ちの一覧表示用）。
 function getDraftsByStatuses(db, statuses) {
   const placeholders = statuses.map(() => '?').join(', ');
@@ -123,6 +128,7 @@ module.exports = {
   openDb,
   insertDraft,
   getDraftsByStatus,
+  getDraftedCompanyIds,
   getDraftsByStatuses,
   countDraftsByStatus,
   getDraftById,
