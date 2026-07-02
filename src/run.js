@@ -64,7 +64,12 @@ async function runM1(options, companies) {
 async function runM2(options, companies) {
   const targets = companies || getCompaniesByStatus('discovered', options.limit);
   const result = await enrichSites(targets, { dbPath: LEADS_DB_PATH });
+  const { tokenJpy, searchJpy, searchCount, callCount } = result.costBreakdown;
   console.log(`[M2] ${result.length}社を巡回しました。合計コスト: 約¥${Math.round(result.costJpy)}`);
+  console.log(
+    `  内訳: トークン代 約¥${Math.round(tokenJpy)} / Web検索代 約¥${Math.round(searchJpy)}` +
+      `（検索${searchCount}回・API呼び出し${callCount}回、1社あたり平均${(searchCount / result.length).toFixed(2)}回検索）`
+  );
   return result;
 }
 
