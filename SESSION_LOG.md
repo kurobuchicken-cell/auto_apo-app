@@ -31,3 +31,9 @@
 - 完了した状態：db.test.jsにgetDraftsByStatuses/countDraftsByStatus/countSentLogの単体テストを追加し全6件パス。ダミー企業（corp-lead-kit）・ダミー下書き（apo.db）で bounced/unsubscribed→サプレッションリスト登録、replied→meeting_set、--reportの歩留まり集計を実機確認。テストデータは両DB（apo.db・corp-lead-kitのleads.db）から削除済み。corp-lead-kit側コミット9c1f19c・push済み、auto_apo-app側コミットb2918bb・push済み。
 - 残課題・次にやること：src/run.js（オーケストレータ、--stage制御）が未実装。M6・M7とも現状は個別に`node src/m6_send.js` / `node src/m7_inbox.js`で単独起動する対話式CLI。README.md・CLAUDE.md（運用ルール・§13の判断スイッチ転記）も未作成。
 - 触ったファイル：src/m7_inbox.js（新規）, src/lib/db.js, src/lib/db.test.js, src/m4_draft.js（auto_apo-app）／ src/suppression.js（新規）, src/index.js（corp-lead-kit、別リポジトリ）
+
+## auto_apo-app-send-01 続き：run.js実装（2026-07-02）
+- やったこと：同セッション内でユーザーの希望によりrun.js（オーケストレータ）も実装。`--stage`でall/単体(m1〜m7)/範囲(例: m2-m4)を指定できるCLIにした。ユーザーに確認の上、`--stage all`はM1（母集団取得）〜M4（下書き生成）の自動パイプラインのみを指すことに決定（M5はDiscord Botが常駐する対話フロー、M6・M7も対話式CLIのため、1プロセスで機械的につなげると使い勝手が悪くなるため）。M5/M6/M7はそれぞれ`--stage m5`等で個別起動する運用。M1はCSVファイルパスの指定が必須なため`--file`引数を追加（.envでの固定パス指定ではなくCLI引数方式をユーザーが選択）。M1〜M3でcorp-lead-kitの公開APIを呼ぶ際は、M7実装時に踏んだのと同じ「dbPath省略でauto_apo-app側に誤ってDBが作られる」不具合を再発させないよう、m4_draft.jsのLEADS_DB_PATHを全呼び出しで明示的に渡すようにした。`--stage m2`/`m3`単体実行時（前段の結果を同一プロセス内で持ち越せない場合）向けに、対象status（discovered/enriched）の企業一覧を読み取り専用SELECTで取得するgetCompaniesByStatusを追加。
+- 完了した状態：run.test.jsでparseStages（all/単体/範囲/不正値）の単体テストを追加し全4件パス。実機では、国税庁CSV列定義に厳密準拠したダミーCSVでM1実行→処理区分99・法人種別101（国の機関）が正しく除外され1社のみdiscovered登録されることを確認。M2（実スクレイピング・AI）は経由せずenriched状態を直接投入してM3のmail_ready遷移を確認。M4は`--dry-run --limit 1`でCLI経由の実行を確認（low_confidence判定は情報不足のテストデータによる想定内の結果）。M6・M7は空状態での委譲を確認。M5（Discord Bot）は実際のDiscord接続を伴うため今回は起動せず、コードレビューでの確認に留めた。テストデータ（ダミーCSVファイル・corp-lead-kit側のテスト企業）は削除済み。コミット済み（35c1481）・push済み。
+- 残課題・次にやること：README.md・CLAUDE.md（運用ルール・§13の判断スイッチ転記）が未作成。M5を`--stage all`の後に実際に通しで動かす検証（Discord実接続を伴うE2E）は未実施。
+- 触ったファイル：src/run.js（新規実装）, src/run.test.js（新規）
