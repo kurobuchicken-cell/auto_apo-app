@@ -3,7 +3,12 @@
 const fs = require('fs');
 const path = require('path');
 const { DatabaseSync } = require('node:sqlite');
-const { openDb: openApoDb, insertDraft } = require('./lib/db');
+const {
+  openDb: openApoDb,
+  insertDraft,
+  getDraftById,
+  updateDraftContent,
+} = require('./lib/db');
 const { createClient, generatePainHypothesis, generateMailBody } = require('./lib/ai');
 const { createBudgetTracker } = require('./lib/cost');
 
@@ -38,6 +43,15 @@ function getMailReadyCompanies(limit) {
   }
 }
 
+function getCompanyById(id) {
+  const db = new DatabaseSync(LEADS_DB_PATH, { readOnly: true });
+  try {
+    return db.prepare(`SELECT id, name, business_summary FROM companies WHERE id = ?`).get(id);
+  } finally {
+    db.close();
+  }
+}
+
 // 署名の法定4項目（仕様書§4-3）。1つでも欠落していれば送信不可のため下書きを作らない。
 function buildSignature() {
   const { SENDER_NAME, SENDER_ADDRESS, SENDER_CONTACT, UNSUBSCRIBE_URL_OR_MAIL } = process.env;
@@ -55,7 +69,8 @@ function buildSignature() {
 }
 
 // 1社分の下書き内容を組み立てる（DB保存は呼び出し側の責務。--dry-run で保存せず確認できるようにするため）。
-async function buildDraftForCompany(client, company, signature, budgetTracker) {
+// userFeedback はM5の✏️（要修正）で人間が入力した修正指示（初回生成時はundefined）。
+async function buildDraftForCompany(client, company, signature, budgetTracker, userFeedback) {
   const { name: companyName, business_summary: businessSummary } = company;
 
   if (!businessSummary) {
@@ -65,6 +80,7 @@ async function buildDraftForCompany(client, company, signature, budgetTracker) {
   const hypothesisResult = await generatePainHypothesis(client, PAIN_HYPOTHESIS_PROMPT, {
     companyName,
     businessSummary,
+    userFeedback,
   });
   const hypothesisCostJpy = budgetTracker.add(hypothesisResult.usage);
 
@@ -83,6 +99,7 @@ async function buildDraftForCompany(client, company, signature, budgetTracker) {
     businessSummary,
     painHypothesis: hypothesisResult.text,
     senderName: process.env.SENDER_NAME,
+    userFeedback,
   });
   const mailCostJpy = budgetTracker.add(mailResult.usage);
 
@@ -150,6 +167,45 @@ async function run({ limit, dryRun = false } = {}) {
   return { processed: results.length, results };
 }
 
+// M5の✏️（要修正）から呼ばれる。該当社のみ下書きを再生成し、既存のdraft行を上書きする
+// （Discordメッセージ側の後始末はM5の責務のため、ここではDBのcontent/statusのみ更新する）。
+async function regenerateDraft(draftId, userFeedback) {
+  const signature = buildSignature();
+  if (!signature) {
+    throw new Error(
+      '署名の法定4項目（SENDER_NAME/SENDER_ADDRESS/SENDER_CONTACT/UNSUBSCRIBE_URL_OR_MAIL）が.envに未設定です。再生成を中止します。'
+    );
+  }
+
+  const apoDb = openApoDb();
+  try {
+    const existing = getDraftById(apoDb, draftId);
+    if (!existing) {
+      throw new Error(`draft id=${draftId} が見つかりません。`);
+    }
+    const company = getCompanyById(existing.company_id);
+    if (!company) {
+      throw new Error(`company id=${existing.company_id} が見つかりません（corp-lead-kit側）。`);
+    }
+
+    const client = createClient();
+    const budgetTracker = createBudgetTracker();
+    const draft = await buildDraftForCompany(client, company, signature, budgetTracker, userFeedback);
+
+    updateDraftContent(apoDb, draftId, {
+      subject: draft.subject,
+      body: draft.body,
+      pain_hypothesis: draft.pain_hypothesis,
+      confidence: draft.confidence,
+      status: 'pending_approval',
+    });
+
+    return { ...getDraftById(apoDb, draftId), companyName: company.name, costJpy: draft.costJpy };
+  } finally {
+    apoDb.close();
+  }
+}
+
 function parseArgs(argv) {
   const args = { limit: null, dryRun: false };
   for (let i = 0; i < argv.length; i++) {
@@ -167,4 +223,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { run, buildDraftForCompany, getMailReadyCompanies };
+module.exports = { run, buildDraftForCompany, getMailReadyCompanies, getCompanyById, regenerateDraft };

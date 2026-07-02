@@ -32,11 +32,17 @@ function parseJsonResponse(text) {
   return JSON.parse(match[0]);
 }
 
+// M5の✏️（要修正）で人間からの修正指示があれば、プロンプトに最優先指示として差し込む。
+function buildFeedbackSection(userFeedback) {
+  return userFeedback ? `## 人間からの修正指示（最優先で反映すること）\n${userFeedback}\n` : '';
+}
+
 // prompts/pain_hypothesis.md のプロンプトで痛み仮説を1つ立てる。情報不足なら "LOW_CONFIDENCE" を返す（仕様書§3 M4）。
-async function generatePainHypothesis(client, template, { companyName, businessSummary }) {
+async function generatePainHypothesis(client, template, { companyName, businessSummary, userFeedback }) {
   const prompt = fillTemplate(template, {
     company_name: companyName,
     business_summary: businessSummary,
+    feedback_section: buildFeedbackSection(userFeedback),
   });
   const message = await client.messages.create({
     model: MODEL,
@@ -47,12 +53,17 @@ async function generatePainHypothesis(client, template, { companyName, businessS
 }
 
 // prompts/mail_body.md のプロンプトで件名・本文をJSON形式で生成する（仕様書§3 M4）。
-async function generateMailBody(client, template, { companyName, businessSummary, painHypothesis, senderName }) {
+async function generateMailBody(
+  client,
+  template,
+  { companyName, businessSummary, painHypothesis, senderName, userFeedback }
+) {
   const prompt = fillTemplate(template, {
     company_name: companyName,
     business_summary: businessSummary,
     pain_hypothesis: painHypothesis,
     sender_name: senderName,
+    feedback_section: buildFeedbackSection(userFeedback),
   });
   // JSON生成が稀に壊れる（不正なエスケープ等）ことがあるため、パース失敗時は1回だけ再試行する。
   let lastError;
