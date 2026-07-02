@@ -16,6 +16,9 @@ const {
   updateDraftContent,
   insertSentLog,
   getSentLogByDraftId,
+  getDraftsByStatuses,
+  countDraftsByStatus,
+  countSentLog,
 } = require('./db');
 
 function withTempDb(fn) {
@@ -122,5 +125,24 @@ test('insertSentLog -> getSentLogByDraftId で往復でき、updateDraftStatus�
 
     updateDraftStatus(db, draft.id, 'sent');
     assert.equal(getDraftById(db, draft.id).status, 'sent');
+  });
+});
+
+test('getDraftsByStatuses / countDraftsByStatus / countSentLog でM7の集計ができる', () => {
+  withTempDb((db) => {
+    const a = insertDraft(db, { company_id: 6, subject: 's', body: 'b', pain_hypothesis: 'p', confidence: 'normal', status: 'sent' });
+    const b = insertDraft(db, { company_id: 7, subject: 's', body: 'b', pain_hypothesis: 'p', confidence: 'normal', status: 'replied' });
+    insertDraft(db, { company_id: 8, subject: 's', body: 'b', pain_hypothesis: 'p', confidence: 'normal', status: 'rejected' });
+    insertSentLog(db, { company_id: 6, draft_id: a.id, channel: 'email' });
+    insertSentLog(db, { company_id: 7, draft_id: b.id, channel: 'email' });
+
+    const targets = getDraftsByStatuses(db, ['sent', 'replied']);
+    assert.equal(targets.length, 2);
+    assert.deepEqual(targets.map((d) => d.status).sort(), ['replied', 'sent']);
+
+    assert.equal(countDraftsByStatus(db, 'sent'), 1);
+    assert.equal(countDraftsByStatus(db, 'replied'), 1);
+    assert.equal(countDraftsByStatus(db, 'meeting_set'), 0);
+    assert.equal(countSentLog(db), 2);
   });
 });

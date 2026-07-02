@@ -46,7 +46,9 @@ function getMailReadyCompanies(limit) {
 function getCompanyById(id) {
   const db = new DatabaseSync(LEADS_DB_PATH, { readOnly: true });
   try {
-    return db.prepare(`SELECT id, name, business_summary, email FROM companies WHERE id = ?`).get(id);
+    return db
+      .prepare(`SELECT id, name, business_summary, email, corporate_no FROM companies WHERE id = ?`)
+      .get(id);
   } finally {
     db.close();
   }
@@ -223,4 +225,11 @@ if (require.main === module) {
   });
 }
 
-module.exports = { run, buildDraftForCompany, getMailReadyCompanies, getCompanyById, regenerateDraft };
+module.exports = {
+  run,
+  buildDraftForCompany,
+  getMailReadyCompanies,
+  getCompanyById,
+  regenerateDraft,
+  LEADS_DB_PATH,
+};

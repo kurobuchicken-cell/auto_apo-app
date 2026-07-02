@@ -60,6 +60,17 @@ function getDraftsByStatus(db, status) {
   return db.prepare(`SELECT * FROM drafts WHERE status = ? ORDER BY id ASC`).all(status);
 }
 
+// M7：sent/repliedなど、複数statusにまたがる下書きを一度に取得する（反応待ち・アポ化待ちの一覧表示用）。
+function getDraftsByStatuses(db, statuses) {
+  const placeholders = statuses.map(() => '?').join(', ');
+  return db.prepare(`SELECT * FROM drafts WHERE status IN (${placeholders}) ORDER BY id ASC`).all(...statuses);
+}
+
+// M7の歩留まりレポート用（送信数→返信数→アポ数）。
+function countDraftsByStatus(db, status) {
+  return db.prepare(`SELECT COUNT(*) as count FROM drafts WHERE status = ?`).get(status).count;
+}
+
 function getDraftById(db, id) {
   return db.prepare(`SELECT * FROM drafts WHERE id = ?`).get(id);
 }
@@ -103,10 +114,17 @@ function getSentLogByDraftId(db, draftId) {
   return db.prepare(`SELECT * FROM sent_log WHERE draft_id = ?`).get(draftId);
 }
 
+// M7の歩留まりレポート用。statusはsent以降replied等に進むため、送信総数はsent_logの件数から数える。
+function countSentLog(db) {
+  return db.prepare(`SELECT COUNT(*) as count FROM sent_log`).get().count;
+}
+
 module.exports = {
   openDb,
   insertDraft,
   getDraftsByStatus,
+  getDraftsByStatuses,
+  countDraftsByStatus,
   getDraftById,
   getDraftByDiscordMessageId,
   setDraftDiscordMessageId,
@@ -114,5 +132,6 @@ module.exports = {
   updateDraftContent,
   insertSentLog,
   getSentLogByDraftId,
+  countSentLog,
   DEFAULT_DB_PATH,
 };
