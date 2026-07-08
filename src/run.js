@@ -1,7 +1,9 @@
 'use strict';
 
 const { DatabaseSync } = require('node:sqlite');
-const { collectFromCsv, enrichSites, filterCompliant } = require('corp-lead-kit');
+const readline = require('node:readline/promises');
+const { stdin: rlInput, stdout: rlOutput } = require('node:process');
+const { collectFromCsv, enrichSites, filterCompliant, qualifyCompanies } = require('corp-lead-kit');
 const m4Draft = require('./m4_draft');
 const m5Discord = require('./m5_discord');
 const m6Send = require('./m6_send');
@@ -9,17 +11,20 @@ const m7Inbox = require('./m7_inbox');
 
 const { LEADS_DB_PATH } = m4Draft;
 
-const STAGE_ORDER = ['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7'];
+// m3b：M3で仕分けたmail_ready/call_listのうち対象を選び、コンプラ判定＋業務内容確認を行う段階
+// （リスト作成アプリ側の「①②」。対象を絞ることでコストのかかるAI呼び出しの母数を最小化する）。
+const STAGE_ORDER = ['m1', 'm2', 'm3', 'm3b', 'm4', 'm5', 'm6', 'm7'];
 // --stage all は自動パイプライン（母集団取得〜下書き生成）のみを指す。
-// M5（Discord承認）は常駐Bot、M6/M7は対話式CLIのため、1プロセスで機械的につなげると
-// 使い勝手が悪くなる（仕様書§6でも各段階を個別実行する想定）。それぞれ個別に起動する運用とする。
+// M3bは対象選択の対話プロンプトとAI課金を伴うため、M5（Discord承認）・M6/M7（対話式CLI）と同様に
+// 明示的に個別起動する運用とする（仕様書§6でも各段階を個別実行する想定）。
 const ALL_STAGES = ['m1', 'm2', 'm3', 'm4'];
 
 function parseStages(stageArg) {
   if (!stageArg) throw new Error('--stage は必須です（例: --stage all, --stage m1, --stage m2-m4）');
   if (stageArg === 'all') return ALL_STAGES;
 
-  const rangeMatch = stageArg.match(/^(m[1-7])-(m[1-7])$/);
+  const stagePattern = STAGE_ORDER.join('|');
+  const rangeMatch = stageArg.match(new RegExp(`^(${stagePattern})-(${stagePattern})$`));
   if (rangeMatch) {
     const start = STAGE_ORDER.indexOf(rangeMatch[1]);
     const end = STAGE_ORDER.indexOf(rangeMatch[2]);
@@ -31,7 +36,7 @@ function parseStages(stageArg) {
 
   if (STAGE_ORDER.includes(stageArg)) return [stageArg];
 
-  throw new Error(`--stage の値が不正です: ${stageArg}（例: all, m1, m2-m4, m5）`);
+  throw new Error(`--stage の値が不正です: ${stageArg}（例: all, m1, m2-m4, m3b, m5）`);
 }
 
 // corp-lead-kitの各M関数は「読み取り専用のSELECTのみ」の境界内でしか直接db参照を許さない
@@ -81,6 +86,54 @@ async function runM3(options, companies) {
   return result;
 }
 
+// メアドあり(mail_ready)/フォームのみ(call_list)のどちらを対象にAI課金（コンプラ判定＋業務内容確認）
+// を行うか、実行のたびに対話で確認する（コストの母数を無自覚に広げないため）。--target で省略可。
+async function promptTarget() {
+  const rl = readline.createInterface({ input: rlInput, output: rlOutput });
+  try {
+    let answer;
+    do {
+      answer = (
+        await rl.question(
+          '実行対象を選んでください:\n' +
+            '1) メアドありの企業のみ（デフォルト）\n' +
+            '2) フォームのみ（メアド無し）の企業のみ\n' +
+            '3) 両方\n> '
+        )
+      ).trim();
+      if (answer === '') answer = '1';
+    } while (!['1', '2', '3'].includes(answer));
+    return { 1: 'email', 2: 'form', 3: 'both' }[answer];
+  } finally {
+    rl.close();
+  }
+}
+
+async function runM3b(options) {
+  const target = options.target || (await promptTarget());
+  const statuses = { email: ['mail_ready'], form: ['call_list'], both: ['mail_ready', 'call_list'] }[target];
+  if (!statuses) {
+    throw new Error(`--target の値が不正です: ${options.target}（email, form, both のいずれか）`);
+  }
+
+  const db = new DatabaseSync(LEADS_DB_PATH, { readOnly: true });
+  let targets;
+  try {
+    const placeholders = statuses.map(() => '?').join(', ');
+    const stmt = db.prepare(`SELECT * FROM companies WHERE status IN (${placeholders}) LIMIT ?`);
+    targets = stmt.all(...statuses, options.limit ? Number(options.limit) : -1);
+  } finally {
+    db.close();
+  }
+
+  const result = await qualifyCompanies(targets, { dbPath: LEADS_DB_PATH });
+  const qualified = result.filter((c) => c.status === 'qualified').length;
+  console.log(
+    `[M3b] 対象: ${target}（${targets.length}社） → qualified: ${qualified}社・合計コスト: 約¥${Math.round(result.costJpy)}`
+  );
+  return result;
+}
+
 async function runM4(options) {
   await m4Draft.run({ limit: options.limit, dryRun: options.dryRun });
 }
@@ -106,6 +159,7 @@ async function run(options) {
     if (stage === 'm1') companies = await runM1(options, companies);
     else if (stage === 'm2') companies = await runM2(options, companies);
     else if (stage === 'm3') companies = await runM3(options, companies);
+    else if (stage === 'm3b') companies = await runM3b(options);
     else if (stage === 'm4') await runM4(options);
     else if (stage === 'm5') return runM5(); // 常駐Botのため、以降の段階には進まない
     else if (stage === 'm6') await runM6(options);
@@ -114,13 +168,14 @@ async function run(options) {
 }
 
 function parseArgs(argv) {
-  const args = { stage: null, file: null, pref: null, limit: null, dryRun: false };
+  const args = { stage: null, file: null, pref: null, limit: null, dryRun: false, target: null };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--stage') args.stage = argv[++i];
     else if (argv[i] === '--file') args.file = argv[++i];
     else if (argv[i] === '--pref') args.pref = argv[++i];
     else if (argv[i] === '--limit') args.limit = Number(argv[++i]);
     else if (argv[i] === '--dry-run') args.dryRun = true;
+    else if (argv[i] === '--target') args.target = argv[++i];
     else if (argv[i] === '--industry') {
       i += 1;
       console.warn(

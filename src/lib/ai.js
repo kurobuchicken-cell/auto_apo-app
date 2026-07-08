@@ -37,11 +37,17 @@ function buildFeedbackSection(userFeedback) {
   return userFeedback ? `## 人間からの修正指示（最優先で反映すること）\n${userFeedback}\n` : '';
 }
 
+// corp-lead-kit側の②（qualifyCompanies）が抽出済みのpain_hintをプロンプトに差し込む。
+function buildProcessHintSection(processHint) {
+  return processHint ? `- 業務プロセスの手がかり: ${processHint}\n` : '';
+}
+
 // prompts/pain_hypothesis.md のプロンプトで痛み仮説を1つ立てる。情報不足なら "LOW_CONFIDENCE" を返す（仕様書§3 M4）。
-async function generatePainHypothesis(client, template, { companyName, businessSummary, userFeedback }) {
+async function generatePainHypothesis(client, template, { companyName, businessSummary, processHint, userFeedback }) {
   const prompt = fillTemplate(template, {
     company_name: companyName,
     business_summary: businessSummary,
+    process_hint_section: buildProcessHintSection(processHint),
     feedback_section: buildFeedbackSection(userFeedback),
   });
   const message = await client.messages.create({

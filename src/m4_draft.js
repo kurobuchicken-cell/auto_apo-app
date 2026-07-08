@@ -32,9 +32,11 @@ function extractSignatureTemplate(raw) {
   return (parts.length > 1 ? parts.slice(1).join('\n---\n') : raw).trim();
 }
 
+// corp-lead-kit側の①②（qualifyCompanies）を経てstatus='qualified'になった会社だけを対象にする
+// （営業お断り判定・事業内容・業種・痛みの手がかりの取得はすでに完了している前提）。
 // 既に下書きがある会社（company_id）はここで除外する。M5の✏️再生成はregenerateDraft経由で
 // 既存draft行を上書きするため、このrunからは呼ばれない＝ここで除外しても再生成フローと衝突しない。
-function getMailReadyCompanies(limit) {
+function getQualifiedCompanies(limit) {
   const leadsDb = new DatabaseSync(LEADS_DB_PATH, { readOnly: true });
   let alreadyDrafted;
   try {
@@ -45,7 +47,7 @@ function getMailReadyCompanies(limit) {
       apoDb.close();
     }
     const rows = leadsDb
-      .prepare(`SELECT id, name, business_summary FROM companies WHERE status = 'mail_ready'`)
+      .prepare(`SELECT id, name, business_summary, pain_hint FROM companies WHERE status = 'qualified'`)
       .all()
       .filter((c) => !alreadyDrafted.has(c.id));
     return limit ? rows.slice(0, Number(limit)) : rows;
@@ -58,7 +60,7 @@ function getCompanyById(id) {
   const db = new DatabaseSync(LEADS_DB_PATH, { readOnly: true });
   try {
     return db
-      .prepare(`SELECT id, name, business_summary, email, corporate_no FROM companies WHERE id = ?`)
+      .prepare(`SELECT id, name, business_summary, pain_hint, email, corporate_no FROM companies WHERE id = ?`)
       .get(id);
   } finally {
     db.close();
@@ -83,8 +85,10 @@ function buildSignature() {
 
 // 1社分の下書き内容を組み立てる（DB保存は呼び出し側の責務。--dry-run で保存せず確認できるようにするため）。
 // userFeedback はM5の✏️（要修正）で人間が入力した修正指示（初回生成時はundefined）。
+// pain_hintはcorp-lead-kit側の②（qualifyCompanies）で既に抽出済みのものをそのまま使う
+// （M4では再度サイトを読みに行かない＝二重取得を避ける）。
 async function buildDraftForCompany(client, company, signature, budgetTracker, userFeedback) {
-  const { name: companyName, business_summary: businessSummary } = company;
+  const { name: companyName, business_summary: businessSummary, pain_hint: processHint } = company;
 
   if (!businessSummary) {
     return { confidence: 'low_confidence', subject: null, body: null, pain_hypothesis: null, costJpy: 0 };
@@ -93,6 +97,7 @@ async function buildDraftForCompany(client, company, signature, budgetTracker, u
   const hypothesisResult = await generatePainHypothesis(client, PAIN_HYPOTHESIS_PROMPT, {
     companyName,
     businessSummary,
+    processHint,
     userFeedback,
   });
   const hypothesisCostJpy = budgetTracker.add(hypothesisResult.usage);
@@ -133,9 +138,9 @@ async function run({ limit, dryRun = false } = {}) {
     );
   }
 
-  const companies = getMailReadyCompanies(limit);
+  const companies = getQualifiedCompanies(limit);
   if (companies.length === 0) {
-    console.log('mail_ready の企業が見つかりませんでした。');
+    console.log('qualified の企業が見つかりませんでした。');
     return { processed: 0, results: [] };
   }
 
@@ -239,7 +244,7 @@ if (require.main === module) {
 module.exports = {
   run,
   buildDraftForCompany,
-  getMailReadyCompanies,
+  getQualifiedCompanies,
   getCompanyById,
   regenerateDraft,
   LEADS_DB_PATH,
