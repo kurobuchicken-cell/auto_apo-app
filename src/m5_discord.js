@@ -176,6 +176,11 @@ function start() {
     await handleFeedbackMessage(message, apoDb).catch((err) => console.error('修正指示の処理でエラー:', err));
   });
 
+  // 接続エラー（EHOSTUNREACH等の一時的な通信断）でプロセスごと落ちないようにする。
+  // discord.js側が内部的に再接続を試みるため、ここではログ出力のみで処理を継続する。
+  client.on('error', (err) => console.error('Discordクライアントでエラー:', err.message));
+  client.on('shardError', (err) => console.error('Discordシャードでエラー:', err.message));
+
   client.login(process.env.DISCORD_BOT_TOKEN);
   return client;
 }
