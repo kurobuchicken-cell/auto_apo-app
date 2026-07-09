@@ -74,3 +74,23 @@
 - 完了した状態：corp-lead-kit側テスト51件・auto_apo-app側テスト10件、全件パス。両リポジトリともコミット・push済み（corp-lead-kit最新: d9dc250 → a7ad71a、auto_apo-app最新: 5a66267）。説明資料もアーキテクチャ変更・コスト構造（3段階：①検索¥6.5/社・②お断り判定+内容確認¥0.6/社・③メール作成¥1.5〜2/社、全件試算約248万円）に合わせて更新済み。
 - 残課題・次にやること：**Brave Search API未登録**（ユーザーがcorp-lead-kit/.envにBRAVE_SEARCH_API_KEYを設定する必要あり）。登録後、(1)検索結果から公式サイトを機械的に選ぶロジック（モール/SNS/求人媒体等の除外リスト）の実装、(2)実データでのコスト・発見率検証、(3)結果次第でfindOfficialWebsiteの置き換えを実施。max_uses=1案は代替案としてまだ採用も見送りも未確定。draft id 9〜12・17〜23はDiscordで`pending_approval`のまま未承認。M5 Botは前回同様セッション間で停止するため次回稼働確認要。README.md・CLAUDE.md整備は引き続き未着手。
 - 触ったファイル：（corp-lead-kit、別リポジトリ）src/index.js, src/lib/ai.js, src/lib/db.js, src/lib/cost.js, src/m2_enrich.js, src/m3_filter.js, src/m3b_qualify.js（新規）, test/ai.test.js, test/m2_enrich.test.js, test/m3_filter.test.js, test/m3b_qualify.test.js（新規） ／（auto_apo-app）prompts/pain_hypothesis.md, src/lib/ai.js, src/m4_draft.js, src/run.js, src/run.test.js, 説明資料_auto_apo-app.html
+
+## auto_apo-app-search-api-01：Brave Search APIによる公式サイト検索の実装・検証、採用見送り（2026-07-09）
+- やったこと：corp-lead-kit/.envにBRAVE_SEARCH_API_KEYを設定してもらい、`src/lib/braveSearch.js`（Brave Search API呼び出し＋除外ドメインリストによる公式サイト選定ロジック）、`src/lib/cost.js`へのクエリ課金コスト計算追加、ユニットテスト、実データ検証スクリプト`scripts/verify_brave_search.js`を実装。status='discovered'（M2未処理・約37万社）からランダムサンプリングして計10〜35社規模で目視検証を実施。
+- **重大な発見：ドメイン除外リスト方式には構造的な限界がある**：
+  1. 除外ドメイン（モール・SNS・求人媒体・法人番号検索サイト等）は当初リストでは不十分で、検証のたびに新しい企業データベース/電話帳サイト（SalesNow、kaishalist.com、grip.website、goo.to法人番号検索、gbiz.go.jp、Mapion電話帳、Yahoo!地図等）が見つかる「いたちごっこ」状態だった。固定リストでの網羅は現実的に困難。
+  2. 誤検出対策として検索結果タイトルと社名の表記ゆれ吸収（全角半角・法人格除去）による突き合わせロジック（`looksLikeMatch`）を追加し、読みが似た無関係企業（「株式会社ＴＨＥＲＡ」→無関係の「株式会社テラ」等）の誤採用は防止できた。
+  3. しかし、**「企業自身が運営するサイトか、企業について書かれた第三者サイトか」の意味的な区別はドメイン除外・タイトル照合だけでは原理的に防げない**ことが判明。実例：「株式会社ウィザードセンター」で検索すると、地域工業団地組合の会員紹介ページ（k-nakahara-kojo.org/members/...）がタイトルに社名を含むため公式サイトとして誤採用された。AIが行っていた「これは公式サイトか」という意味理解に相当する判断が、機械的ロジックには無い。
+  4. 加えて、公式サイト自体を持たない小規模企業（有限会社・合同会社クラス）が一定数存在し、その場合Brave検索はNOT_FOUNDではなく企業に言及した別ページを返す傾向があった。
+- コスト自体は非常に安い（¥0.75/社、Brave Search APIはクエリ課金$5/1,000回のみ）ことを確認したが、精度面の課題を共有した結果、ユーザー判断で**採用見送り・現行のAI検索(findOfficialWebsite)を維持**することに決定。今回作成したbraveSearch.js・関連テスト・検証スクリプト・cost.jsの変更は削除し、corp-lead-kitを直前のコミット(d9dc250)の状態に戻した（コミットはしていない）。
+- 完了した状態：corp-lead-kitはBrave関連の変更を削除しworking tree clean、既存テスト51件全パスを確認済み。ライブラリ選定の結論（除外リスト方式は精度上の限界があり不採用）は本エントリに記録済みなので、再検討する場合は先に上記4点の限界を踏まえた設計（例：Haikuによる軽量な最終判定を挟むハイブリッド案）から検討すること。
+- 残課題・次にやること：検索コスト削減は未解決のまま（現行AI検索¥6.5/社を維持）。max_uses=1案（¥3.17/社、発見率25%）も含め、次に検討する場合はSESSION_LOG.md本エントリとauto_apo-app-costopt-01エントリを両方参照。draft id 9〜12・17〜23はDiscordで`pending_approval`のまま未承認。M5 Bot稼働確認・README.md/CLAUDE.md整備は引き続き未着手。
+- 触ったファイル：（corp-lead-kit、削除済み・コミットなし）src/lib/braveSearch.js, test/braveSearch.test.js, scripts/verify_brave_search.js, src/lib/cost.js（変更は取り消し済み）
+
+### 追記：max_uses=1への変更を同一企業ペア比較で検証・採用（同日）
+- Brave案を見送った後、代替案として残っていたmax_uses=1（web_searchツールの最大呼び出し回数を3→1に制限）を、同一100社に対しmax_uses=3とmax_uses=1を両方実行するペア比較で検証した（前回セッションの40社テストは別企業群同士の比較で「確定的ではない」との注記があったため、企業群の違いという交絡要因を消す設計にした）。
+- 結果（同一100社、scratchpadの一回限りスクリプトで実行・コミットなし）：max_uses=3は発見率25/100(25.0%)・¥6.12/社、max_uses=1は発見率21/100(21.0%)・¥3.29/社。内訳は両方○20社／3のみ○5社／1のみ○1社／両方×74社。発見率の差(4pt)はMcNemar exact検定でp≈0.22となり統計的有意差なし（コインの表裏程度の再現性しかない可能性がある）が、コスト削減(-46%)は前回テスト(-51%)と近い水準で再現性が高いと判断。
+- ユーザー判断で**max_uses=1を本番デフォルトに採用**。corp-lead-kit/src/lib/ai.jsのfindOfficialWebsiteに`maxUses`パラメータを追加（デフォルト値を3→1に変更、既存テスト51件は影響なく全パス）。検証根拠はai.js内のコメントにも要点を記載。
+- 完了した状態：corp-lead-kit/src/lib/ai.jsのmaxUsesデフォルトが1になり、テスト51件全パス。コミットはまだしていない（要ユーザー確認）。
+- 残課題・次にやること：コミット・push未実施。全社（残り約37.3万社）に適用した場合の期待効果は、コスト削減 約106万円・発見数減少（統計的には非有意だが）最大約1.5万社。説明資料のコスト実績（¥6.5/社）はこの変更を反映しておらず更新が必要。
+- 触ったファイル：（corp-lead-kit）src/lib/ai.js
